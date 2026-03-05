@@ -2,9 +2,9 @@ import { DataSource } from "typeorm";
 
 const datasource = new DataSource({
   type: "postgres",
-  host: "localhost",
+  host: "db",
   username: "postgres",
-  password: "supersecret",
+  password: "Root_2026_Secure!",
   database: "postgres",
   entities: [__dirname + "/entities/**/*.{js,ts}"],
   logging: true,
