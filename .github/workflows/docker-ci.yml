@@ -23,6 +23,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Prepare image name
+        run: |
+          REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE_PREFIX=ghcr.io/$REPO" >> $GITHUB_ENV
+
       - name: Install backend dependencies
         working-directory: ./server
         run: yarn install --frozen-lockfile
