@@ -1,0 +1,18 @@
+services:
+  manager:
+    image: docker:dind
+    privileged: true
+    hostname: manager
+  node1:
+    image: docker:dind
+    privileged: true
+    hostname: node1
+  node2:
+    image: docker:dind
+    privileged: true
+    hostname: node2
+  node3:
+    image: docker:dind
+    privileged: true
+    hostname: node3
+  
