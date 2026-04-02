@@ -1,0 +1,5 @@
+services: 
+  hello-world:
+    image: nmatsui/hello-world-api
+    deploy: 
+       mode: global
