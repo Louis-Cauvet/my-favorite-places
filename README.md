@@ -93,7 +93,11 @@ services:
 ```
 puis on relance le déploiement avec `docker stack deploy --compose-file hello-world.compose.yml hello-world --detach=false`.
 
-Dans ce cas, on constate qu'il n'y a plus qu'un seul réplica de l'image 'hello-world', qui est situé sur le manager. En effet, si on exécute `docker ps` dans nos containeurs 'node', ce container n'est plus exécuté.
+Dans ce cas, on constate qu'il n'y a plus qu'un seul réplica de l'image 'hello-world', qui est situé sur le manager : 
+
+![alt text](images/image9.png)
+
+En effet, si on exécute `docker ps` dans nos containeurs 'node', ce container n'est plus exécuté.
 
 **Remarque :** A l'inverse, si on souhiate déployer la stack sur tous les noeuds, il faut que le fichier 'hello-world.compose.yml' du manager contienne : 
 ```yaml
@@ -104,3 +108,83 @@ services:
       mode: global
 ```
 car le mode "global" crée un container par noeud (soit 4 ici puisqu'on a un manager et 3 workers).
+
+### 3) Premiers test Ansible
+
+A partir du repo cloné, on cherche à démarrer 3 containers noeuds sans modifier le fichier 'compose.yml'.  
+Pour cela, on va utiliser une option de Docker Composer : le scaling.
+
+Une fois placé dans le répertoire du projet, on exécute `docker compose up -d --scale node=3`, afin de créer 3 containters pour le service 'node', en plus du container 'manager'.
+
+Ainsi, si on exécute un `docker ps`, on constate que les containers en question sont bien instanciés : 
+
+![alt text](images/image10.png)
+
+Cette approche nous permet de conserver un fichier "compose.yml" générique et de gérer dynamiquement le nombre de noeuds directement via la commande `docker compose up`.
+
+
+Pour installer et tester Ansible sur une machine Windows, il faut passer par WSL (Linux sous Windows).  
+Tout d'abord, installer Ubuntu avec la commande `wsl --install -d Ubuntu` dans Powershell.
+
+Une fois Ubuntu démarré, on installe Ansible avec la commande `sudo apt install ansible -y`, ainsi que le support Docker pour Ansible avec `ansible-galaxy collection install community.docker`  
+**Remarque :** On doit installer ce support car par défaut, Ansible fonctionne via SSH mais dans notre cas nous n'en avons pas, et le fichier "inventory.ini" indique que Ansible doit exécuter les commandes directement dans les containers Docker, pas via SSH avec la ligne suivante :
+```ini
+ansible_connection=community.docker.docker
+``` 
+
+Ainsi, si on veut pouvoir piloter des containers Docker directement, il faut inclure ce support qui ajoute à Ansible des modules Docker, et des types de connexion spécifiques.
+
+On se place ensuite à la racine du projet pour tenter d'exécuter la commande Shell de "ansible.sh" : 
+```shell
+ansible-playbook -i ansible/inventory.ini ansible/init_swarm_cluster.yml
+```
+, et on constate alors l'erreur suivante :
+
+![alt text](images/image11.png)
+
+qui indique que les noeuds essayent de rejoindre le hostname `router:2377`, mais que celui-çi n'existe pas dans le réseau Docker.
+
+Pour corriger cette erreur, il faut donc modifier le fichier 'ansible/init_swarm_cluster.yaml' pour passer de 
+```yaml 
+command: "{{ hostvars[groups['managers'][0]]['worker_join_command'] }} router:2377"
+```
+à 
+```yaml 
+command: "{{ hostvars[groups['managers'][0]]['worker_join_command'] }} manager:2377"
+```
+puisque 'manager' correspond au nom du service dans le `docker compose`.
+
+Si on relance ensuite la commande Shell 
+```shell
+ansible-playbook -i ansible/inventory.ini ansible/init_swarm_cluster.yml
+```
+, on constate que tous les nodes ont bien rejoint le cluster :
+
+![alt text](images/image12.png)
+
+Ainsi, Le playbook est composé de deux parties :
+
+- La première s'exécute sur le manager :
+  - initialise le cluster Docker Swarm avec `docker swarm init`
+  - récupère le token permettant aux noeuds de rejoindre le cluster
+
+- La seconde s'exécute sur les workers :
+  - utilise le token pour exécuter `docker swarm join`
+  - connecte automatiquement chaque noeud au cluster
+
+Ce processus permet d'automatiser entièrement la création du cluster grâce à Ansible sans intervention manuelle.  
+Toutes les opérations sont exécutées en une seule commande, ce qui évite toute configuration manuelle sur chaque noeud.
+
+En guise de vérification, on peut se connecter au manager (toujours avec `docker exec -it esgi-2604-ansible-manager-1 sh`) et exécuter `docket node ls` pour constater que tous les containers tournent bien : 
+
+![alt text](images/image13.png)
+
+En se connectant sur les noeuds, et en exécutant `docker info | grep Swarm`, on remarque également que le cluster Swarm est bien actif : 
+
+![alt text](images/image14.png)
+
+**Remarque :** Si l'on relance le playbook sur les mêmes machines, on observe que toutes les tâches sont à nouveau exécutées et marquées comme 'changed'.   
+Cela s'explique par le fait que le playbook utilise le module `raw`, qui exécute directement les commandes sans vérifier l'état actuel du système.  
+Ainsi, les commandes `docker swarm init` et `docker swarm join` sont relancées à chaque exécution, même si le cluster est déjà configuré.
+
+### 4) Comprendre Ansible
