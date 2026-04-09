@@ -188,3 +188,29 @@ Cela s'explique par le fait que le playbook utilise le module `raw`, qui exécut
 Ainsi, les commandes `docker swarm init` et `docker swarm join` sont relancées à chaque exécution, même si le cluster est déjà configuré.
 
 ### 4) Comprendre Ansible
+
+On va essayer d'ajouter un nouveau noeud au cluster avec Docker Compse grâce à la commande `docker compose up -d --scale node=4`.
+
+Si l'on vérifie ensuite les containeurs qui tournent avec `docker ps`, on constate bien qu'un nouveau noeud 'esgi-2604-ansible-node-4' existe : 
+
+![alt text](images/image15.png)
+
+Cela necéssite donc d'ajouter un nouveau noeud dans la liste des workers du fichier 'inventory.ini' : 
+```ini
+[workers]
+esgi-2604-ansible-node-1
+esgi-2604-ansible-node-2
+esgi-2604-ansible-node-3
+esgi-2604-ansible-node-4
+```
+afin que Ansible le prenne en compte.
+
+On peut ensuite relancer le playbook avec :
+```shell
+ansible-playbook -i ansible/inventory.ini ansible/init_swarm_cluster.yml
+```
+, et on constate alors que le node4 à bien rejoint le cluster.
+
+Pour preuve, si on se connecte au manager et qu'on liste à nouveau ses containers avec `docker node ls`, on y trouve bien une mention au nouveau noeud : 
+
+![alt text](images/image16.png)
