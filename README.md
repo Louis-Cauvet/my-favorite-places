@@ -214,3 +214,54 @@ ansible-playbook -i ansible/inventory.ini ansible/init_swarm_cluster.yml
 Pour preuve, si on se connecte au manager et qu'on liste à nouveau ses containers avec `docker node ls`, on y trouve bien une mention au nouveau noeud : 
 
 ![alt text](images/image16.png)
+
+#### Adaptation pour des VMs / VPS Linux
+Si l'on souhaite utiliser ce playbook sur des machines virtuelles accessibles en SSH, il faut réaliser plusieurs modifications.
+
+Dans le fichier `inventory.ini`, il faut remplacer la connexion Docker par une connexion SSH en spécifiant l'utilisateur et la clé privée :
+```ini
+- ansible_connection=ssh
+- ansible_user=ubuntu
+- ansible_ssh_private_key_file=~/.ssh/id_rsa
+```
+
+Les noms des containers sont donc remplacés par les adresses IP des machines.
+
+Dans le playbook `init_swarm_cluster.yml`, le module 'raw' peut être remplacé par 'command', car les machines disposent d'un environnement Python complet.
+Par exemple :
+```yaml
+raw: "docker swarm init"
+```
+devient 
+```yaml
+command: "docker swarm init"
+```
+
+Il est également nécéssaire d'ajouter des tâches pour installer et démarrer Docker sur les machines distantes :
+```yaml
+- name: Install Docker
+  apt:
+    name: docker.io
+    state: present
+    update_cache: yes 
+```
+et 
+```yaml
+- name: Start Docker
+  service:
+    name: docker
+    state: started
+    enabled: yes
+```
+
+Enfin, le nom d'hôte du manager 
+```yaml
+{{ hostvars[groups['managers'][0]]['worker_join_command'] }} manager:2377
+```
+doit être remplacé par son adresse IP :
+```yaml
+{{ hostvars[groups['managers'][0]]['inventory_hostname'] }}:2377
+```
+afin de permettre aux containeurs workers de rejoindre le cluster.
+
+Ces modifications permettent d'adapter le playbook à un environnement réel basé sur des serveurs distants.
