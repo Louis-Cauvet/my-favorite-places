@@ -265,3 +265,141 @@ doit être remplacé par son adresse IP :
 afin de permettre aux containeurs workers de rejoindre le cluster.
 
 Ces modifications permettent d'adapter le playbook à un environnement réel basé sur des serveurs distants.
+
+#### Ajout de Ansible dans le projet 'favorite places'
+
+Afin d'inclure Ansible dans le projet, on va commencer par modifier le fichier 'infra/compose.yml', car il décrit actuellement les containeurs 'manager' et 'node' de manière explicite.   
+Afin de le rendre plus générique, et de créer les workers à partir de la commande `--scale`, on lui écrit donc le code suivant :
+```yaml 
+name: esgi-2603-my-favorite-places
+
+services:
+  manager:
+    build: .
+    privileged: true
+    hostname: manager
+
+  node:
+    build: .
+    privileged: true
+```
+La première ligne fixe le nom du projet Docker Compose, afin de générer la base des noms de conteneurs qui en découleront (ex : 'esgi-2603-my-favorite-places-manager-1', 'esgi-2603-my-favorite-places-node-2'...).  
+
+Ensuite, on déclare les services Docker Compose en indiquant que les images seront construites à partir d'un fichier 'infra/Dockerfile' que l'on construira ensuite, car les images `docker:dind`ne suffiront pas dans le contexte d'Ansible puisqu'il a besoin que les machines utilisées aient Python d'installé. Ainsi, dans le 'Dockerfile', on indiquera une commande pour appliquer ce prérequis.  
+Le manager conserve un nom d'hôte afin d'être facilement identifié dans le cluster Docker Swarm.
+
+**Remarque :** Pour les noeuds, on déclare à présent un service générique qui permet d'utiliser le scaling et qui évite de définir chacun d'entre eux à la main.
+
+Il faut donc ensuite créer un fichier 'infra/Dockerfile', dans lequel on écrit le code suivant : 
+```docker
+FROM docker:dind
+
+RUN apk add --update --no-cache python3 py3-pip && ln -sf python3 /usr/bin/python
+RUN apk add sudo
+```
+
+Dans ce fichier, la ligne
+```docker
+FROM docker:dind
+```
+indique qu'on part de l'image officielle `docker:dind`, comme c'était déja le cas avant. CHaque conteneur pourra donc exécuter Docker en interne.
+
+Ensuite, la ligne
+```docker
+RUN apk add --update --no-cache python3 py3-pip && ln -sf python3 /usr/bin/python
+```
+installe python sur les machines, afin qu'Ansible puisse exécuter correctement ses modules.
+
+Et la dernière ligne 
+```docker
+RUN apk add sudo
+```
+installe sudo, afin de pouvoir exécuter certaines commandes en usant de privilèges sur nos différentes machines.
+
+
+A partir de ces 2 fichiers, si on exécute `docker compose up -d --build --scale node=3`, on obtiens bien 4 containers qui tournent : 
+
+![alt text](images/image17.png)
+
+Chacun de ces containers est issu d'une image `docker:dind`, possède Python d'installé et peut exécuter des commandes en `sudo`.
+
+A présent, il faut donc indiquer à Ansible lesquels sont considérés comme manager et lequels comme workers.
+
+Pour cela, on crée un nouveau dossier 'infra/ansible' dans lequel on définit un fichier 'inventory.ini'.
+
+On y réécrit donc le contenu de l'inventaire à l'identique de celui utilisé dans les tests d'Ansible précédemment, en adaptant bien les noms des conteneurs à ceux générés : 
+```ini
+[managers]
+esgi-2603-my-favorite-places-manager-1
+
+[managers:vars]
+ansible_connection=community.docker.docker
+
+[workers]
+esgi-2603-my-favorite-places-node-1
+esgi-2603-my-favorite-places-node-2
+esgi-2603-my-favorite-places-node-3
+
+[workers:vars]
+ansible_connection=community.docker.docker
+```
+
+On a donc des conteneurs qui tournent, et un inventory Ansible qui sait les cibler.
+
+On peut donc ensuite créer le fichier 'infra/ansible/init_swarm_cluster.yml' :
+```yaml
+- name: Initialize Docker Swarm
+  hosts: managers
+  become: yes
+  tasks:
+    - name: Initialize swarm on first manager
+      command: docker swarm init
+      run_once: true
+      register: swarm_init_result
+      failed_when: "'This node is already part of a swarm' not in swarm_init_result.stderr and swarm_init_result.rc != 0"
+
+    - name: Retrieve worker join token
+      command: docker swarm join-token worker -q
+      register: worker_token
+      run_once: true
+
+    - name: Set worker join command as a fact
+      set_fact:
+        worker_join_command: "docker swarm join --token {{ worker_token.stdout }}"
+
+    - name: Display worker join command
+      debug:
+        var: worker_join_command
+
+- name: Join workers to the Swarm cluster
+  hosts: workers
+  become: yes
+  tasks:
+    - name: Join swarm as worker
+      command: "{{ hostvars[groups['managers'][0]]['worker_join_command'] }} manager:2377"
+      register: swarm_join_result
+      failed_when: "'This node is already part of a swarm' not in swarm_join_result.stderr and swarm_join_result.rc != 0"
+
+```
+dans lequel on initialise d'abord le manager, puis Docker Swarm sur celui-ci.  
+Ensuite, on récupère le token que les workers doivent utiliser pour rejoindre le cluster, puis on construit la commande qui sera utilisée sur ces workers.
+
+Le second bloc s'exécute sur tous les workers, pour leur indiquer comment rejoindre le cluster grâce à ce token.
+Au final, cela produit une commande du style `docker swarm join --token SWMTKN-1-xxxxx manager:2377`.
+
+Pour tester, on peut alors exécuter la commande `ansible-playbook -i ansible/inventory.ini ansible/init_swarm_cluster.yml` qui démarre le playbook, puis rentrer dans le manager avec `docker exec -it esgi-2603-my-favorite-places-manager-1 sh`et lister les contenurs qui lui sont associés avec `docker node ls` :
+
+![alt text](images/image18.png)
+
+
+#### Ansible et Terraform
+Terraform est un outil qui sert à décrire et déployer une infrastructure, en créant et en modifiant des ressources.
+
+Concrètement, là où Ansible sert plutôt à configurer des machines déjà disponibles, Terraform sert à : 
+- créer des VM
+- créer des réseaux
+- créer des volumes
+- créer des bases de données managées
+- ...
+
+En général, Ansible configure et orchestre donc des clusters sur le matériel mis à disposition par Terraform.

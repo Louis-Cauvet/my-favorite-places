@@ -1,0 +1,31 @@
+- name: Initialize Docker Swarm
+  hosts: managers
+  become: yes
+  tasks:
+    - name: Initialize swarm on first manager
+      command: docker swarm init
+      run_once: true
+      register: swarm_init_result
+      failed_when: "'This node is already part of a swarm' not in swarm_init_result.stderr and swarm_init_result.rc != 0"
+
+    - name: Retrieve worker join token
+      command: docker swarm join-token worker -q
+      register: worker_token
+      run_once: true
+
+    - name: Set worker join command as a fact
+      set_fact:
+        worker_join_command: "docker swarm join --token {{ worker_token.stdout }}"
+
+    - name: Display worker join command
+      debug:
+        var: worker_join_command
+
+- name: Join workers to the Swarm cluster
+  hosts: workers
+  become: yes
+  tasks:
+    - name: Join swarm as worker
+      command: "{{ hostvars[groups['managers'][0]]['worker_join_command'] }} manager:2377"
+      register: swarm_join_result
+      failed_when: "'This node is already part of a swarm' not in swarm_join_result.stderr and swarm_join_result.rc != 0"
