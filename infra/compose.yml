@@ -5,6 +5,8 @@ services:
     build: .
     privileged: true
     hostname: manager
+    ports:
+      - "80:80"    
 
   node:
     build: .

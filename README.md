@@ -1,6 +1,5 @@
 # Projet d'infrastructure et devops : Compte rendu - CAUVET Louis, M2 IW à l'ESGI Lyon
 
-
 ### 1) Création du cluster Docker Swarm
 Pour mettre en place le cluster Docker Swarm, on crée un nouveau dossier "infra" à la racine de mon application et on y place un fichier "compose.yml" avec le code suivant :
 ```yaml
@@ -403,3 +402,93 @@ Concrètement, là où Ansible sert plutôt à configurer des machines déjà di
 - ...
 
 En général, Ansible configure et orchestre donc des clusters sur le matériel mis à disposition par Terraform.
+
+### 5) Déploiement de Traefik
+
+Pour déployer Traefik sur le manager, on doit d'abord entrer dans celui avec la commande `docker exec -it esgi-2603-my-favorite-places-manager-1 sh`.
+
+On peut ensuite reproduire directement dans le manager le fichier "traefik.yml" du repo fourni par l'énoncé.
+Pour cela, dans le manager, on crée un nouveau répertoire avec `mkdir -p /home/manager`, puis on s'y rend et on y crée un nouveau fichier "traefik.yml" qui reproduit le contenu de celui du repo de l'énoncé :
+```yaml
+services:
+  traefik:
+    image: traefik:v3.6
+    networks:
+      - web
+    ports:
+      - 80:80
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command:
+      - "--entrypoints.web.address=:80"
+      - "--providers.swarm.endpoint=unix:///var/run/docker.sock"
+      - "--providers.swarm.watch=true"
+      - "--providers.swarm.exposedbydefault=false"
+      - "--providers.swarm.network=web"
+      - "--api.dashboard=true"
+      - "--api.insecure=true"
+      - "--log.level=INFO"
+      - "--accesslog=true"
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.dashboard.rule=Host(`traefik.swarm.localhost`)"
+        - "traefik.http.routers.dashboard.entrypoints=web"
+        - "traefik.http.routers.dashboard.service=api@internal"
+        - "traefik.http.services.dashboard.loadbalancer.server.port=8080"
+
+  whoami:
+    image: traefik/whoami
+    networks:
+      - web
+    deploy:
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.whoami.rule=Host(`whoami.swarm.localhost`)"
+        - "traefik.http.routers.whoami.entrypoints=web"
+        - "traefik.http.services.whoami.loadbalancer.server.port=80"
+
+networks:
+  web:
+    external: true
+```
+
+Dans ce fichier, il est spécifié que le réseau "web" est déclaré comme `external: true` ici :
+```yaml 
+networks:
+  web:
+    external: true
+```
+Il faut donc le créer nous-même manuellement avant de pouvoir déployer, avec la commande `docker network create --driver overlay --attachable web` exécutée dans le manager.
+
+Cette commande permet de créer un nouveau réseau Docker en mode "overlay", afin de faire communiquer des containers sur plusieurs noeuds différents. Ainsi, le manager et les nodes peuvent se parler.
+
+On peut alors vérifier qu'il a bien été créé avec la commande `docker network ls` :
+
+![alt text](images/image19.png)
+
+On peut ensuite exécuter le déploiement de la stack depuis le manager avec la commande :
+
+```bash
+docker stack deploy --compose-file /home/manager/traefik.yml traefik --detach=false
+```
+
+puis vérifier que les services tournent avec `docker service ls` :
+
+![alt text](images/image20.png)
+
+Il faut ensuite mettre à jour le fichier 'hosts' de la machine pour que **traefik.swarm.localhost** et **whoami.swarm.localhost** soient 
+accessibles depuis le navigateur. On y ajoute donc les lignes suivantes : 
+```
+127.0.0.1 traefik.swarm.localhost
+127.0.0.1 whoami.swarm.localhost
+```
+
+Et on peut accéder aux ulrs depuis la machine :
+
+![alt text](images/image21.png)
