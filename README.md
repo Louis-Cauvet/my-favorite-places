@@ -631,3 +631,139 @@ On peut alors accéder à l'appli sur notre machine, à l'aide des urls indiqué
 ![alt text](images/image23.png)
 
 ### 6) Piloter l'infrastructure avec Portainer
+
+Pour déployer Portainer sur notre cluster Swarm, il faut créer un nouveau fichier "portainer.yml" dans le répertoire "/home/manager" qui contient déja "traefik.yml".    
+Ce fichier "portainer.yml" doit contenir le code : 
+
+```yaml
+version: '3.2'
+
+services:
+  agent:
+    image: portainer/agent:lts
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/docker/volumes:/var/lib/docker/volumes
+    networks:
+      - agent_network
+    deploy:
+      mode: global
+      placement:
+        constraints: [node.platform.os == linux]
+
+  portainer:
+    image: portainer/portainer-ce:lts
+    command: -H tcp://tasks.agent:9001 --tlsskipverify
+    volumes:
+      - portainer_data:/data
+    networks:
+      - agent_network
+      - web
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints: [node.role == manager]
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.portainer.rule=Host(`portainer.swarm.localhost`)"
+        - "traefik.http.routers.portainer.entrypoints=web"
+        - "traefik.http.services.portainer.loadbalancer.server.port=9000"
+
+networks:
+  agent_network:
+    driver: overlay
+    attachable: true
+  web:
+    external: true
+
+volumes:
+  portainer_data:
+```
+
+On peut ensuite déployer cette stack avec `docker stack deploy -c /home/manager/portainer.yml portainer`, mettre à jour le fichier "hosts" avec : 
+```
+127.0.0.1 portainer.swarm.localhost
+```
+
+puis accéder à Portainer via l'url 'http://portainer.swarm.localhost/' :
+
+![alt text](images/image24.png)
+
+Maintenant que Portainer tourne bien sur Swarm, on peut tenter de supprimer la stack de l'app de vote dans le manager avec `docker stack rm voting` : 
+
+![alt text](images/image25.png)
+
+Puis on redéploie cette stack directement depuis l'interface de Portainer. Pour cela, sélectionner l'environnement "Primary" qui correspond au Swarm, puis dans la section "Stacks", clique sur "Add stack" :
+
+![alt text](images/image26.png)
+
+Choisir comme nom "voting" et dans l'éditeur "Web editor", coller le contenu de "docker-stack.yml" :
+```yaml
+version: "3.9"
+
+services:
+
+  redis:
+    image: redis:alpine
+    networks:
+      - frontend
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "postgres"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    networks:
+      - backend
+
+  vote:
+    image: dockersamples/examplevotingapp_vote
+    networks:
+      - frontend
+      - web
+    deploy:
+      replicas: 2
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.vote.rule=Host(`vote.swarm.localhost`)"
+        - "traefik.http.routers.vote.entrypoints=web"
+        - "traefik.http.services.vote.loadbalancer.server.port=80"
+
+  result:
+    image: dockersamples/examplevotingapp_result
+    networks:
+      - backend
+      - web
+    deploy:
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.result.rule=Host(`result.swarm.localhost`)"
+        - "traefik.http.routers.result.entrypoints=web"
+        - "traefik.http.services.result.loadbalancer.server.port=80"
+
+  worker:
+    image: dockersamples/examplevotingapp_worker
+    networks:
+      - frontend
+      - backend
+    deploy:
+      replicas: 2
+
+networks:
+  frontend:
+  backend:
+  web:
+    external: true
+
+volumes:
+  db-data:
+```
+
+puis cliquer sur "Deploy stack". La stack apparaît alors bien dans la liste :
+
+![alt text](images/image27.png)
+
+et l'appli de vote est toujours disponible aux urls "http://vote.swarm.localhost/" et "http://result.swarm.localhost/".
