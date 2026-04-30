@@ -792,6 +792,66 @@ export default apiRouter;
 
 ```
 
-On doit alors refaire un `docker compose up -d` à la racine de "esgi-2603-my-favorite-places" pour que les conatiners prennent en compte cette nouvelle donnée, puis si on se rend à l'url "http://localhost:3000/api", on constate bien l'apparition du message : 
+On doit alors refaire un `docker compose up -d` à la racine de "esgi-2603-my-favorite-places" pour que les containers prennent en compte cette nouvelle donnée, puis si on se rend à l'url "http://localhost:3000/api", on constate bien l'apparition du message : 
 
 ![alt text](images/image28.png)
+
+On peut alors pousser sur le repo Git pour que le CI se déclanche et publie une nouvelle image sur Docker.
+
+Pour tester cette image, on remplace les `build: ./server` et `build: ./client` du fichier "esgi-2603-my-favorite-places\compose.yml" :
+
+```yaml
+services:
+  db:
+    image: postgres:15
+    restart: unless-stopped
+    volumes: 
+     - pgdata:/var/lib/postgresql/data
+    environment: 
+    - POSTGRES_PASSWORD=Root_2026_Secure!
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  server:
+    image: ghcr.io/louis-cauvet/my-favorite-places-back:latest
+    restart: unless-stopped
+    ports:
+      - 3000:3000
+    depends_on:
+      db:
+        condition: service_healthy
+
+  front: 
+    image: ghcr.io/louis-cauvet/my-favorite-places-front:latest
+    restart: unless-stopped
+    ports: 
+      - 8080:80
+    volumes:
+      - ./client/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    
+volumes:
+  pgdata:
+```
+
+Puis on rééfectue un `docker compose up -d` pour que nos containers s'appuient sur ces images :
+
+![alt text](images/image29.png)
+
+Et le endpoint "Bonjour !" s'affiche toujours bien à l'url "http://localhost:3000/api/"
+
+Pour ajouter le tag correspondant à notre branche principale ("main"), il faut mettre à jour le fichier "esgi-2603-my-favorite-places\.github\workflows\docker-ci.yml" en ajoutant de nouvelles spécifications de tags, pour le back : 
+```yaml
+tags: |
+    ${{ env.IMAGE_PREFIX }}-back:latest
+    ${{ env.IMAGE_PREFIX }}-back:main
+```
+
+et le front :
+```yaml
+tags: |
+    ${{ env.IMAGE_PREFIX }}-front:latest
+    ${{ env.IMAGE_PREFIX }}-front:main
+```
