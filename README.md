@@ -408,7 +408,7 @@ En général, Ansible configure et orchestre donc des clusters sur le matériel 
 Pour déployer Traefik sur le manager, on doit d'abord entrer dans celui avec la commande `docker exec -it esgi-2603-my-favorite-places-manager-1 sh`.
 
 On peut ensuite reproduire directement dans le manager le fichier "traefik.yml" du repo fourni par l'énoncé.
-Pour cela, dans le manager, on crée un nouveau répertoire avec `mkdir -p /home/manager`, puis on s'y rend et on y crée un nouveau fichier "traefik.yml" qui reproduit le contenu de celui du repo de l'énoncé :
+Pour cela, dans le manager, on crée un nouveau répertoire avec `mkdir -p /home/manager`, puis on s'y rend et on y crée un nouveau fichier "traefik.yml" qui reproduit le contenu de celui du repo de l'énoncé (avec nano) :
 ```yaml
 services:
   traefik:
@@ -482,8 +482,7 @@ puis vérifier que les services tournent avec `docker service ls` :
 
 ![alt text](images/image20.png)
 
-Il faut ensuite mettre à jour le fichier 'hosts' de la machine pour que **traefik.swarm.localhost** et **whoami.swarm.localhost** soient 
-accessibles depuis le navigateur. On y ajoute donc les lignes suivantes : 
+Il faut ensuite mettre à jour le fichier 'hosts' de la machine pour que **traefik.swarm.localhost** et **whoami.swarm.localhost** soient accessibles depuis le navigateur. On y ajoute donc les lignes suivantes : 
 ```
 127.0.0.1 traefik.swarm.localhost
 127.0.0.1 whoami.swarm.localhost
@@ -492,3 +491,143 @@ accessibles depuis le navigateur. On y ajoute donc les lignes suivantes :
 Et on peut accéder aux ulrs depuis la machine :
 
 ![alt text](images/image21.png)
+
+Pour procéder au déploiement de cette application sur notre infrastructure Docker Swarm, il faut copier le fichier de stack "docker-stack.yml" avec le code suivant :
+
+```yaml
+version: "3.9"
+
+services:
+
+  redis:
+    image: redis:alpine
+    networks:
+      - frontend
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "postgres"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    networks:
+      - backend
+
+  vote:
+    image: dockersamples/examplevotingapp_vote
+    ports:
+      - 8080:80
+    networks:
+      - frontend
+    deploy:
+      replicas: 2
+
+  result:
+    image: dockersamples/examplevotingapp_result
+    ports:
+      - 8081:80
+    networks:
+      - backend
+
+  worker:
+    image: dockersamples/examplevotingapp_worker
+    networks:
+      - frontend
+      - backend
+    deploy:
+      replicas: 2
+
+networks:
+  frontend:
+  backend:
+
+volumes:
+  db-data:
+```
+
+à la racine du manager, puis on peut procéder au déploiement de cette stack avec la commande `docker stack deploy -c /docker-stack.yml voting` exécutée directement dans le manager.
+
+Pour vérifier que le déploiement s'est bien effectué et que tous les containers de l'appli tournent bien, on peut utiliser la commande `docker stack ps voting` :
+
+![alt text](images/image22.png)
+
+Maintenant que le service est bien déployé, on souhaite faire en sorte que les applis soient dispos sur des urls de notre machine. Pour faire ceci, il faut adapter le fichier "docker-stack.yml" situé à la racine du manager en lui ajoutant le réseau "web" et des labels Traefik.
+
+Voici donc le nouveau contenu que doit posséder ce fichier : 
+
+```yaml
+version: "3.9"
+
+services:
+
+  redis:
+    image: redis:alpine
+    networks:
+      - frontend
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "postgres"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    networks:
+      - backend
+
+  vote:
+    image: dockersamples/examplevotingapp_vote
+    networks:
+      - frontend
+      - web
+    deploy:
+      replicas: 2
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.vote.rule=Host(`vote.swarm.localhost`)"
+        - "traefik.http.routers.vote.entrypoints=web"
+        - "traefik.http.services.vote.loadbalancer.server.port=80"
+
+  result:
+    image: dockersamples/examplevotingapp_result
+    networks:
+      - backend
+      - web
+    deploy:
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.result.rule=Host(`result.swarm.localhost`)"
+        - "traefik.http.routers.result.entrypoints=web"
+        - "traefik.http.services.result.loadbalancer.server.port=80"
+
+  worker:
+    image: dockersamples/examplevotingapp_worker
+    networks:
+      - frontend
+      - backend
+    deploy:
+      replicas: 2
+
+networks:
+  frontend:
+  backend:
+  web:
+    external: true
+
+volumes:
+  db-data:
+```
+
+On peut alors ensuite redéployer l'application, toujours avec la commande `docker stack deploy -c /docker-stack.yml voting`, et ajouter les urls dans le fichier 'hosts' de notre machine :
+
+```
+127.0.0.1 vote.swarm.localhost
+127.0.0.1 result.swarm.localhost
+```
+
+On peut alors accéder à l'appli sur notre machine, à l'aide des urls indiquées : 
+
+![alt text](images/image23.png)
+
+### 6) Piloter l'infrastructure avec Portainer
