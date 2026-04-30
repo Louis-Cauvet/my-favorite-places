@@ -767,3 +767,31 @@ puis cliquer sur "Deploy stack". La stack apparaît alors bien dans la liste :
 ![alt text](images/image27.png)
 
 et l'appli de vote est toujours disponible aux urls "http://vote.swarm.localhost/" et "http://result.swarm.localhost/".
+
+### 7) Déployer My Favorite Place
+
+On va à présent effectuer une modification dans l'application "My Favorite Place", afin de vérifier que cela crée une nouvelle image via le CI mis en place.
+
+La modification en question est la suivante : dans le fichier "esgi-2603-my-favorite-places\server\src\router.ts", on va ajouter un endpoint GET pour afficher "Bonjour !" :
+
+```ts
+import { Router } from "express";
+import usersRouter from "./controllers/Users";
+import addressesRouter from "./controllers/Addresses";
+
+const apiRouter = Router();
+
+apiRouter.get("/", (_req, res) => {
+  res.send("Bonjour !");
+});
+
+apiRouter.use("/users", usersRouter);
+apiRouter.use("/addresses", addressesRouter);
+
+export default apiRouter;
+
+```
+
+On doit alors refaire un `docker compose up -d` à la racine de "esgi-2603-my-favorite-places" pour que les conatiners prennent en compte cette nouvelle donnée, puis si on se rend à l'url "http://localhost:3000/api", on constate bien l'apparition du message : 
+
+![alt text](images/image28.png)
