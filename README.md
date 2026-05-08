@@ -955,3 +955,7 @@ res.send("Bonjour !");
 ```
 dans le fichier "esgi-2603-my-favorite-places\server\src\router.ts".
 
+On peut ensuite poussser ces changements et attendre que le CI GitHub Actions pousse la nouvelle image ":main".   
+Shepherd doit ensuite détecter la nouvelle image et redémarrer `mfp_api`, pour que le nouveau message apparaisse :
+
+![alt text](images/image32.png) 
