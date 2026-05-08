@@ -762,7 +762,7 @@ volumes:
   db-data:
 ```
 
-puis cliquer sur "Deploy stack". La stack apparaît alors bien dans la liste :
+puis cliquer sur "Deploy the stack". La stack apparaît alors bien dans la liste :
 
 ![alt text](images/image27.png)
 
@@ -855,3 +855,103 @@ tags: |
     ${{ env.IMAGE_PREFIX }}-front:latest
     ${{ env.IMAGE_PREFIX }}-front:main
 ```
+
+Ainsi, si on pousse à nouveau ces modifs, les images Docker générées sont bien associées au tag 'main'.
+
+On peut alors déployer la stack dans Portainer, en ajoutant une nouvelle stack (toujours section "Stacks"). On lui choisit comme nom "mfp", et comme contenu une stack Docker Swarm qui repose sur les images générées :
+
+```yaml
+version: "3.9"
+
+services:
+  api:
+    image: ghcr.io/louis-cauvet/my-favorite-places-back:main
+    networks:
+      - app
+      - web
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.mfp-api.rule=Host(`api.swarm.localhost`)"
+        - "traefik.http.services.mfp-api.loadbalancer.server.port=3000"
+        - "traefik.http.routers.mfp-api.entrypoints=web"
+        - "traefik.docker.network=web"
+
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: Root_2026_Secure!
+      POSTGRES_DB: postgres
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    networks:
+      - app
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+
+networks:
+  app:
+    driver: overlay
+  web:
+    external: true
+
+volumes:
+  db-data:
+```
+
+puis on déploie la stack .
+
+On met ensuite à nouveau à jour le fichier "hosts" avec :
+```
+127.0.0.1 api.swarm.localhost
+```
+
+et si on accède à l'url "http://api.swarm.localhost/api/", on obtient bien le message que l'on a précédemment configuré : 
+
+![alt text](images/image30.png)
+
+### 8) Ajouter Sherpherd
+
+POur créer une nouvelle stack Shepherd depuis Porainer, il faut créer une nouvelle stack nommée 'shepherd' avec le contenu suivant dans les web editor : 
+
+```yaml
+version: "3"
+
+services:
+  app:
+    image: containrrr/shepherd
+    environment:
+      SLEEP_TIME: '1m'
+      FILTER_SERVICES: ''
+      VERBOSE: 'true'
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+```
+
+Puis procéder à son déploiement.   
+Ensuite, dans les logs de "shepherd_app", on peut constater que Shepherd parcourt nos services toutes les minutes pour indiquer si une mise à jour est disponible ou non :
+
+![alt text](images/image31.png) 
+
+Avec Shepherd, dès que le Ci poussera une nouvelle image avec le tag ":main" sur GHCR, Shepherd le détectera au prochain cycle et mettra à jour automatiquement le service `mfp_api` sans intervention manuelle.
+
+Pour tester ce système, on va effectuer une modification dans notre app MFP, en remplaçant la ligne
+```ts
+res.send("Hello !");
+```
+par 
+```ts
+res.send("Bonjour !");
+```
+dans le fichier "esgi-2603-my-favorite-places\server\src\router.ts".
+
