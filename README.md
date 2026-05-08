@@ -947,11 +947,11 @@ Avec Shepherd, dès que le Ci poussera une nouvelle image avec le tag ":main" su
 
 Pour tester ce système, on va effectuer une modification dans notre app MFP, en remplaçant la ligne
 ```ts
-res.send("Hello !");
+res.send("Bonjour !");
 ```
 par 
 ```ts
-res.send("Bonjour !");
+res.send("Hello !");
 ```
 dans le fichier "esgi-2603-my-favorite-places\server\src\router.ts".
 
