@@ -959,3 +959,9 @@ On peut ensuite poussser ces changements et attendre que le CI GitHub Actions po
 Shepherd doit ensuite détecter la nouvelle image et redémarrer `mfp_api`, pour que le nouveau message apparaisse :
 
 ![alt text](images/image32.png) 
+
+### 9) Documentation
+
+Voici une illustration documentant le fonctionnement général de ce projet : 
+
+![alt text](images/image33.png) 
